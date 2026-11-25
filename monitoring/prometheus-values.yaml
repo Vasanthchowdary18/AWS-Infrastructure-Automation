@@ -1,0 +1,42 @@
+# Helm values for prometheus-community/kube-prometheus-stack
+# Install: see scripts/install-monitoring.sh
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    # pick up ServiceMonitors / PrometheusRules from every namespace
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp2
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+grafana:
+  service:
+    type: LoadBalancer
+  # adminPassword is passed with --set at install time (never commit it)
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+
+alertmanager:
+  alertmanagerSpec:
+    retention: 120h
+  # Configure a receiver (Slack/email) here to get notifications, e.g.:
+  # config:
+  #   route:
+  #     receiver: slack
+  #   receivers:
+  #     - name: slack
+  #       slack_configs:
+  #         - api_url: https://hooks.slack.com/services/XXX
+  #           channel: "#alerts"
+  #           send_resolved: true

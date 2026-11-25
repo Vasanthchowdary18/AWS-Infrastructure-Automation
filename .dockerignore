@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+coverage.xml
+tests/
+terraform/
+k8s/
+monitoring/
+jenkins/
+scripts/
+*.md

@@ -1,0 +1,66 @@
+# Loaded automatically by the Grafana sidecar (label grafana_dashboard: "1")
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devops-app-dashboard
+  namespace: devops-app
+  labels:
+    grafana_dashboard: "1"
+data:
+  devops-app.json: |
+    {
+      "title": "DevOps App - Overview",
+      "uid": "devops-app",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "panels": [
+        {
+          "type": "stat", "title": "App Health (targets up)",
+          "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+          "targets": [{ "expr": "sum(up{namespace=\"devops-app\",job=\"devops-app\"})" }]
+        },
+        {
+          "type": "stat", "title": "Available Replicas",
+          "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+          "targets": [{ "expr": "kube_deployment_status_replicas_available{namespace=\"devops-app\",deployment=\"devops-app\"}" }]
+        },
+        {
+          "type": "stat", "title": "Pod Restarts (1h)",
+          "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+          "targets": [{ "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"devops-app\"}[1h]))" }]
+        },
+        {
+          "type": "stat", "title": "Requests / sec",
+          "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+          "targets": [{ "expr": "sum(rate(app_http_requests_total{namespace=\"devops-app\"}[5m]))" }]
+        },
+        {
+          "type": "timeseries", "title": "CPU usage (cores) by pod",
+          "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+          "targets": [{ "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"devops-app\",container=\"devops-app\"}[5m])) by (pod)", "legendFormat": "{{pod}}" }]
+        },
+        {
+          "type": "timeseries", "title": "Memory working set by pod",
+          "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [{ "expr": "sum(container_memory_working_set_bytes{namespace=\"devops-app\",container=\"devops-app\"}) by (pod)", "legendFormat": "{{pod}}" }]
+        },
+        {
+          "type": "timeseries", "title": "HTTP requests by status",
+          "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+          "targets": [{ "expr": "sum(rate(app_http_requests_total{namespace=\"devops-app\"}[5m])) by (status)", "legendFormat": "{{status}}" }]
+        },
+        {
+          "type": "timeseries", "title": "p95 latency",
+          "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(app_http_request_duration_seconds_bucket{namespace=\"devops-app\"}[5m])) by (le))", "legendFormat": "p95" }]
+        },
+        {
+          "type": "timeseries", "title": "Pod restarts",
+          "gridPos": { "x": 0, "y": 20, "w": 24, "h": 6 },
+          "targets": [{ "expr": "sum(kube_pod_container_status_restarts_total{namespace=\"devops-app\"}) by (pod)", "legendFormat": "{{pod}}" }]
+        }
+      ]
+    }

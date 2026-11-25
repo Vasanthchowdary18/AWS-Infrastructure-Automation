@@ -1,0 +1,70 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: devops-app-alerts
+  namespace: devops-app
+spec:
+  groups:
+    - name: devops-app.rules
+      rules:
+        - alert: AppHighCPU
+          expr: |
+            sum(rate(container_cpu_usage_seconds_total{namespace="devops-app",container="devops-app"}[5m])) by (pod)
+              /
+            sum(kube_pod_container_resource_limits{namespace="devops-app",container="devops-app",resource="cpu"}) by (pod)
+              > 0.8
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU on {{ $labels.pod }}"
+            description: "CPU usage is above 80% of the limit for 5 minutes."
+
+        - alert: AppHighMemory
+          expr: |
+            sum(container_memory_working_set_bytes{namespace="devops-app",container="devops-app"}) by (pod)
+              /
+            sum(kube_pod_container_resource_limits{namespace="devops-app",container="devops-app",resource="memory"}) by (pod)
+              > 0.8
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory on {{ $labels.pod }}"
+            description: "Memory usage is above 80% of the limit for 5 minutes."
+
+        - alert: AppPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="devops-app"}[15m]) > 2
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.pod }} is restarting"
+            description: "Pod restarted more than 2 times in 15 minutes."
+
+        - alert: AppDown
+          expr: up{namespace="devops-app",job="devops-app"} == 0 or absent(up{namespace="devops-app",job="devops-app"})
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "devops-app is down"
+            description: "Prometheus cannot scrape the app's /metrics endpoint."
+
+        - alert: AppNoAvailableReplicas
+          expr: kube_deployment_status_replicas_available{namespace="devops-app",deployment="devops-app"} < 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "devops-app has no healthy replicas"
+
+        - alert: AppHigh5xxRate
+          expr: |
+            sum(rate(app_http_requests_total{namespace="devops-app",status=~"5.."}[5m]))
+              /
+            sum(rate(app_http_requests_total{namespace="devops-app"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "More than 5% of requests are failing"
