@@ -20,3 +20,8 @@ terraform/.terraform.lock.hcl
 .env
 *.pem
 jenkins/.env
+
+# Local secrets
+grafana-admin-password.txt
+terraform/tfplan
+terraform/*.log
