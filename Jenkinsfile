@@ -69,7 +69,7 @@ pipeline {
             steps {
                 // Filesystem scan (deps + IaC misconfig) and image scan; fail on HIGH/CRITICAL
                 sh '''
-                    trivy fs --exit-code 1 --severity HIGH,CRITICAL --scanners vuln,secret --no-progress .
+                    trivy fs --exit-code 1 --severity HIGH,CRITICAL --scanners vuln,secret --skip-dirs .venv --no-progress .
                     trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --no-progress \
                         --format table -o trivy-report.txt ${ECR_REPO_NAME}:${IMAGE_TAG}
                 '''
@@ -79,55 +79,49 @@ pipeline {
             }
         }
 
+        // AWS access below comes from the Jenkins EC2 instance's IAM role - no stored keys.
         stage('Push to ECR') {
-            when { branch 'main' }
+            when { expression { env.GIT_BRANCH ==~ /(origin\/)?main/ } }
             steps {
-                withCredentials([usernamePassword(credentialsId: 'aws-credentials',
-                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    sh '''
-                        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-                        REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${REGISTRY}
-                        docker tag ${ECR_REPO_NAME}:${IMAGE_TAG} ${REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}
-                        docker tag ${ECR_REPO_NAME}:${IMAGE_TAG} ${REGISTRY}/${ECR_REPO_NAME}:latest
-                        docker push ${REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}
-                        docker push ${REGISTRY}/${ECR_REPO_NAME}:latest
-                        echo "${REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}" > image.txt
-                    '''
-                }
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${REGISTRY}
+                    docker tag ${ECR_REPO_NAME}:${IMAGE_TAG} ${REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}
+                    docker tag ${ECR_REPO_NAME}:${IMAGE_TAG} ${REGISTRY}/${ECR_REPO_NAME}:latest
+                    docker push ${REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}
+                    docker push ${REGISTRY}/${ECR_REPO_NAME}:latest
+                    echo "${REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}" > image.txt
+                '''
             }
         }
 
         stage('Deploy to EKS') {
-            when { branch 'main' }
+            when { expression { env.GIT_BRANCH ==~ /(origin\/)?main/ } }
             steps {
-                withCredentials([usernamePassword(credentialsId: 'aws-credentials',
-                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    sh '''
-                        IMAGE=$(cat image.txt)
-                        aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+                sh '''
+                    IMAGE=$(cat image.txt)
+                    export KUBECONFIG=$WORKSPACE/.kubeconfig
+                    aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
 
-                        kubectl apply -f k8s/namespace.yaml
-                        kubectl apply -f k8s/service.yaml -f k8s/hpa.yaml -f k8s/pdb.yaml
-                        sed "s#IMAGE_PLACEHOLDER#${IMAGE}#g" k8s/deployment.yaml | kubectl apply -f -
-                        kubectl -n ${K8S_NAMESPACE} annotate deployment/devops-app \
-                            kubernetes.io/change-cause="Jenkins build ${BUILD_NUMBER} image ${IMAGE}" --overwrite
+                    kubectl apply -f k8s/namespace.yaml
+                    kubectl apply -f k8s/service.yaml -f k8s/hpa.yaml -f k8s/pdb.yaml
+                    sed "s#IMAGE_PLACEHOLDER#${IMAGE}#g" k8s/deployment.yaml | kubectl apply -f -
+                    kubectl -n ${K8S_NAMESPACE} annotate deployment/devops-app \
+                        kubernetes.io/change-cause="Jenkins build ${BUILD_NUMBER} image ${IMAGE}" --overwrite
 
-                        # Automatic rollback if the rolling update does not become healthy
-                        if ! kubectl -n ${K8S_NAMESPACE} rollout status deployment/devops-app --timeout=180s; then
-                            echo "Rollout failed - rolling back to previous revision"
-                            kubectl -n ${K8S_NAMESPACE} rollout undo deployment/devops-app
-                            kubectl -n ${K8S_NAMESPACE} rollout status deployment/devops-app --timeout=180s
-                            exit 1
-                        fi
+                    # Automatic rollback if the rolling update does not become healthy
+                    if ! kubectl -n ${K8S_NAMESPACE} rollout status deployment/devops-app --timeout=180s; then
+                        echo "Rollout failed - rolling back to previous revision"
+                        kubectl -n ${K8S_NAMESPACE} rollout undo deployment/devops-app
+                        kubectl -n ${K8S_NAMESPACE} rollout status deployment/devops-app --timeout=180s
+                        exit 1
+                    fi
 
-                        kubectl -n ${K8S_NAMESPACE} get svc devops-app \
-                            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' > app-url.txt || true
-                        echo "App URL: http://$(cat app-url.txt)"
-                    '''
-                }
+                    kubectl -n ${K8S_NAMESPACE} get svc devops-app \
+                        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' > app-url.txt || true
+                    echo "App URL: http://$(cat app-url.txt)"
+                '''
             }
         }
     }

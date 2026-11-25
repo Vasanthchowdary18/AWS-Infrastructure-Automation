@@ -32,7 +32,7 @@ GitHub push ──webhook──► Jenkins
 
 ## Prerequisites
 
-AWS account + IAM user with admin (for Terraform) · AWS CLI v2 · Terraform ≥ 1.6 · kubectl · Helm 3 · Docker · a GitHub repo.
+AWS account + IAM user with admin (for Terraform; Jenkins itself uses an IAM role) · AWS CLI v2 · Terraform ≥ 1.6 · kubectl · Helm 3 · Docker · a GitHub repo.
 
 > **Cost warning:** EKS control plane (~$0.10/h), 2× t3.medium nodes, a NAT gateway and 2 load balancers cost roughly **$6–8/day**. Run `scripts/destroy.sh` when done.
 
@@ -68,20 +68,21 @@ Prints the Grafana URL. Dashboard **"DevOps App - Overview"** loads automaticall
 
 ## 4. Start Jenkins + SonarQube
 
-Run on an EC2 instance (t3.large, ports 8080/9000 open) so GitHub can reach the webhook — or locally with `ngrok http 8080`.
+Terraform (`terraform/jenkins.tf`) creates a t3.large Ubuntu EC2 server in the VPC's public subnet. It is fully automatic — no manual setup wizard:
+
+- **IAM role** on the instance gives Jenkins ECR push + EKS deploy rights (no stored AWS keys). An EKS access entry maps the role into the cluster.
+- **Security group**: port 8080 only from GitHub's webhook IPs and `admin_cidr`; port 9000 (SonarQube) only from `admin_cidr`. No SSH — use SSM Session Manager.
+- **Boot script** (`terraform/jenkins-userdata.sh.tftpl`) installs Docker, clones this repo, starts SonarQube, sets its admin password, creates an analysis token and the Jenkins webhook, then starts Jenkins.
+- **JCasC** (`jenkins/casc/jenkins.yaml`) creates the `admin` user, the `sonarqube` server config and the `devops-python-app` pipeline job with the GitHub push trigger.
+- Admin passwords are random and stored in SSM Parameter Store:
 
 ```bash
-cd jenkins
-DOCKER_GID=$(getent group docker | cut -d: -f3) docker compose up -d --build
-docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+aws ssm get-parameter --with-decryption --name /devops-python-app/jenkins/admin-password --query Parameter.Value --output text
+aws ssm get-parameter --with-decryption --name /devops-python-app/sonarqube/admin-password --query Parameter.Value --output text
+terraform -chdir=terraform output jenkins_url
 ```
 
-1. **SonarQube** (`:9000`, admin/admin → change): *My Account → Security* → generate a token. *Administration → Configuration → Webhooks* → add `http://jenkins:8080/sonarqube-webhook/`.
-2. **Jenkins** (`:8080`): finish setup, then *Manage Jenkins → Credentials* add:
-   - `aws-credentials` – *Username with password* (username = Access Key ID, password = Secret Access Key)
-   - `sonar-token` – *Secret text*
-3. *Manage Jenkins → System → SonarQube servers*: name **`sonarqube`**, URL `http://sonarqube:9000`, token `sonar-token`.
-4. *New Item → Multibranch Pipeline* (or Pipeline from SCM) → your GitHub repo, script path `Jenkinsfile`.
+If your home IP changes, update `admin_cidr` in `terraform/terraform.tfvars` and run `terraform apply`. Boot log on the server: `/var/log/ci-bootstrap.log`.
 
 ## 5. GitHub webhook
 

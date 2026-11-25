@@ -33,8 +33,18 @@ variable "ecr_repo_name" {
   default = "devops-python-app"
 }
 
-variable "jenkins_iam_user_arn" {
-  description = "ARN of the IAM user/role Jenkins uses, granted cluster-admin on EKS. Leave empty to skip."
+variable "repo_url" {
+  description = "Public GitHub repo Jenkins builds"
   type        = string
-  default     = ""
+  default     = "https://github.com/Vasanthchowdary18/AWS-Infrastructure-Automation.git"
+}
+
+variable "jenkins_instance_type" {
+  type    = string
+  default = "t3.large"
+}
+
+variable "admin_cidr" {
+  description = "Your public IP in CIDR form (x.x.x.x/32) allowed to open Jenkins and SonarQube"
+  type        = string
 }

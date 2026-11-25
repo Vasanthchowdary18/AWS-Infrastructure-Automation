@@ -90,20 +90,6 @@ module "eks" {
       desired_size   = var.node_desired_size
     }
   }
-
-  access_entries = var.jenkins_iam_user_arn == "" ? {} : {
-    jenkins = {
-      principal_arn = var.jenkins_iam_user_arn
-      policy_associations = {
-        admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-      }
-    }
-  }
 }
 
 # EBS CSI driver role (needed for Prometheus/Grafana persistent volumes)

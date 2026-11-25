@@ -9,4 +9,5 @@ sonar
 junit
 timestamper
 ws-cleanup
-blueocean
+configuration-as-code
+job-dsl

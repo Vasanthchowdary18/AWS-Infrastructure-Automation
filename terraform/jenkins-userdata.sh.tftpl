@@ -1,0 +1,62 @@
+#!/bin/bash
+# Bootstraps Jenkins + SonarQube on first boot. Log: /var/log/ci-bootstrap.log
+set -euxo pipefail
+exec > >(tee -a /var/log/ci-bootstrap.log) 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y ca-certificates curl git jq unzip
+
+# Docker engine + compose plugin
+curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker
+
+# AWS CLI (to read secrets from SSM)
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip
+unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install
+
+# SonarQube (Elasticsearch) kernel requirement
+sysctl -w vm.max_map_count=524288
+echo "vm.max_map_count=524288" > /etc/sysctl.d/99-sonarqube.conf
+
+# 2 GB swap as a safety net for builds
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo "/swapfile none swap sw 0 0" >> /etc/fstab
+
+# Secrets
+JENKINS_PW=$(aws ssm get-parameter --region ${region} --with-decryption --name "${jenkins_param}" --query Parameter.Value --output text)
+SONAR_PW=$(aws ssm get-parameter --region ${region} --with-decryption --name "${sonar_param}" --query Parameter.Value --output text)
+
+TOKEN_IMDS=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN_IMDS" http://169.254.169.254/latest/meta-data/public-ipv4)
+
+# Code
+git clone "${repo_url}" /opt/ci
+cd /opt/ci/jenkins
+
+# 1) SonarQube first, then configure it through its API
+docker compose up -d sonarqube
+until curl -sf http://localhost:9000/api/system/status | grep -q '"status":"UP"'; do sleep 10; done
+
+curl -sf -u admin:admin -X POST http://localhost:9000/api/users/change_password \
+  --data-urlencode login=admin --data-urlencode previousPassword=admin --data-urlencode "password=$SONAR_PW" || true
+
+SONAR_TOKEN=$(curl -sf -u "admin:$SONAR_PW" -X POST http://localhost:9000/api/user_tokens/generate \
+  --data-urlencode name=jenkins --data-urlencode type=GLOBAL_ANALYSIS_TOKEN | jq -r .token)
+
+curl -sf -u "admin:$SONAR_PW" -X POST http://localhost:9000/api/webhooks/create \
+  --data-urlencode name=jenkins --data-urlencode url=http://jenkins:8080/sonarqube-webhook/ || true
+
+# 2) Jenkins, configured by JCasC from these env vars
+cat > .env <<EOF
+JENKINS_ADMIN_PASSWORD=$JENKINS_PW
+SONAR_TOKEN=$SONAR_TOKEN
+JENKINS_URL=http://$PUBLIC_IP:8080/
+REPO_URL=${repo_url}
+DOCKER_GID=$(getent group docker | cut -d: -f3)
+EOF
+chmod 600 .env
+
+docker compose up -d --build jenkins
+until curl -s -o /dev/null -w '%%{http_code}' http://localhost:8080/login | grep -q 200; do sleep 10; done
+echo "CI BOOTSTRAP COMPLETE"
