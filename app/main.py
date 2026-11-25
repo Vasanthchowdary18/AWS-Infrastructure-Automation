@@ -43,7 +43,7 @@ def create_app() -> Flask:
     @app.get("/")
     def index():
         return jsonify(
-            message="Hello from the DevOps demo app!",
+            message="Hello from the DevOps demo app! Deployed automatically by Jenkins.",
             version=APP_VERSION,
             host=socket.gethostname(),
         )
