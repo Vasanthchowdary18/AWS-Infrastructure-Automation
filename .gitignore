@@ -25,3 +25,5 @@ jenkins/.env
 grafana-admin-password.txt
 terraform/tfplan
 terraform/*.log
+jenkins-admin-password.txt
+sonarqube-admin-password.txt

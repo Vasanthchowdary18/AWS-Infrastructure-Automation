@@ -1,6 +1,6 @@
 #!/bin/bash
 # Bootstraps Jenkins + SonarQube on first boot. Log: /var/log/ci-bootstrap.log
-set -euxo pipefail
+set -euo pipefail   # no xtrace: this script handles secrets
 exec > >(tee -a /var/log/ci-bootstrap.log) 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
@@ -34,12 +34,16 @@ PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN_IMDS" http://169.254.16
 git clone "${repo_url}" /opt/ci
 cd /opt/ci/jenkins
 
-# 1) SonarQube first, then configure it through its API
+# 1) SonarQube first, then configure it through its API.
+#    validateWebhooks=false lets SonarQube call Jenkins on the private Docker network.
 docker compose up -d sonarqube
 until curl -sf http://localhost:9000/api/system/status | grep -q '"status":"UP"'; do sleep 10; done
 
 curl -sf -u admin:admin -X POST http://localhost:9000/api/users/change_password \
   --data-urlencode login=admin --data-urlencode previousPassword=admin --data-urlencode "password=$SONAR_PW" || true
+
+curl -sf -u "admin:$SONAR_PW" -X POST http://localhost:9000/api/settings/set \
+  --data-urlencode key=sonar.validateWebhooks --data-urlencode value=false
 
 SONAR_TOKEN=$(curl -sf -u "admin:$SONAR_PW" -X POST http://localhost:9000/api/user_tokens/generate \
   --data-urlencode name=jenkins --data-urlencode type=GLOBAL_ANALYSIS_TOKEN | jq -r .token)
