@@ -187,3 +187,14 @@ resource "aws_instance" "jenkins" {
 
   depends_on = [aws_eks_access_policy_association.jenkins]
 }
+
+# Inside the VPC the EKS endpoint resolves to its private IPs, so Jenkins must be
+# allowed through the cluster security group to reach the Kubernetes API.
+resource "aws_vpc_security_group_ingress_rule" "eks_api_from_jenkins" {
+  security_group_id            = module.eks.cluster_security_group_id
+  referenced_security_group_id = aws_security_group.jenkins.id
+  ip_protocol                  = "tcp"
+  from_port                    = 443
+  to_port                      = 443
+  description                  = "Kubernetes API from Jenkins"
+}
